@@ -3,15 +3,66 @@
 #include <libavdevice/avdevice.h>
 #include <SDL2/SDL.h>
 
-int main(int argc, char **argv) {
-  
+//   Initial state:
+//   Queue : q0 | q1 | q2 | # | # 
+//           ^         ^
+//           first     last
+//   After queue_add:
+//   Queue : q0 | q1 | q2 | q3 | #
+//           ^              ^
+//           first          last
+//   After queue_next:
+//   Queue : # | q1 | q2 | q3 | #  | #
+//               ^         ^
+//               first     last
+//
+//   Initial Queue:
+//   max_size = 6
+//   Queue : q4 | # | q0 | q1 | q2 | q3
+//           ^        ^
+//           last=0   first=2
+struct PacketQueueDesc {
+  int first;
+  int next;
+  int max_size;
+  AVPacket * contents;
+};
+typedef struct PacketQueueDesc * PacketQueue;
+
+PacketQueue queue_create(const int max_size, const int initial_size, AVPacket * packets);
+void queue_destroy(PacketQueue queue);
+void queue_add(PacketQueue queue, AVPacket packet);
+int queue_is_empty(PacketQueue queue);
+AVPacket queue_next(PacketQueue queue);
+
+PacketQueue queue_create(const int max_size, const int initial_size, AVPacket * packets)
+{
+  SDL_assert(initial_size <= max_size);
+  PacketQueue res = malloc(sizeof(PacketQueue));
+  res->contents = malloc(initial_size * sizeof(AVPacket));
+  memcpy(res->contents, packets, max_size * sizeof(AVPacket));
+  res->next = initial_size; ;
+  res->max_size = max_size;
+  res->first = 0;  
+  return res;
+}
+
+void queue_add(PacketQueue queue, AVPacket packet) {
+  if (
+}
+
+
+
+int main(int argc, char **argv) {  
   AVFormatContext *format_context = NULL;
   AVCodecContext *video_codec_context;
   AVCodecContext *audio_codec_context;
   AVCodec *video_codec;
   AVCodec *audio_codec;
   AVFrame *frame;
-  
+  int audio_stream_index = -1;
+  int video_stream_index = -1;
+
   av_register_all();
   avcodec_register_all();
 
@@ -21,19 +72,15 @@ int main(int argc, char **argv) {
 
   format_context = avformat_alloc_context();
   if (avformat_open_input(&format_context, argv[1], NULL, NULL)) {
-    // TODO: Log error.
     printf("Unable to open input.\n");
     exit(1);
   }
 
   if (avformat_find_stream_info(format_context, NULL)) {
-    // TODO: Log error.
     printf("Unable to find stream info\n");
     exit(1);
   }
-
-  int audio_stream_index = -1;
-  int video_stream_index = -1;
+  // Search for first available audio / video stream.
   for (int i = 0, N = format_context->nb_streams; i < N; ++i) {
     if (format_context->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
       audio_stream_index = i;
@@ -47,7 +94,6 @@ int main(int argc, char **argv) {
   }
 
   if (video_stream_index < 0 || audio_stream_index < 0) {
-    // TODO: Log error.
     printf("Unable to find audio or video stream.");
     exit(1);
   }
@@ -56,15 +102,23 @@ int main(int argc, char **argv) {
   if (!video_codec_context) {
     exit(1);
   }
+  
   audio_codec_context = format_context->streams[audio_stream_index]->codec;
-
-  video_codec = avcodec_find_decoder(video_codec_context->codec_id);
-
-  if (avcodec_open2(video_codec_context, video_codec, NULL) < 0) {
-    // TODO: Log error.
+  if (!audio_codec_context) {
     exit(1);
   }
+  
+  video_codec = avcodec_find_decoder(video_codec_context->codec_id);
+  audio_codec = avcodec_find_decoder(audio_codec_context->codec_id);
+  
+  if (avcodec_open2(video_codec_context, video_codec, NULL) < 0) {
+     exit(1);
+  }
 
+  if (avcodec_open2(audio_codec_context, audio_codec, NULL) < 0) {
+    exit(1);
+  }
+  
   frame = av_frame_alloc();
   if (!frame) {
     // TODO: Log error.
